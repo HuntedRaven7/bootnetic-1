@@ -1,5 +1,8 @@
+---
+# yaml-language-server: $schema=https://schema.blue-build.org/recipe-v1.json
 name: bootnetic
 description: Custom Fedora Kinoite image for ThinkPad T460
+
 base-image: ghcr.io/ublue-os/kinoite-main
 image-version: latest
 
@@ -47,7 +50,7 @@ modules:
     remove:
       - firefox
       - firefox-langpacks
-      
+
   # 3. System-wide Flatpaks
   - type: flatpak
     notify: true
