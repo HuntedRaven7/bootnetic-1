@@ -49,14 +49,11 @@ modules:
       - firefox
       - firefox-langpacks
 
-  # 3. System-wide Flatpaks
+  # 3. System-wide Flatpaks (v2 syntax)
   - type: default-flatpaks
     notify: true
     system:
-      repo-url: https://dl.flathub.org/repo/flathub.flatpakrepo
-      repo-name: flathub
-      repo-description: Flathub
-      install:
+      flatpaks:
         - com.google.Chrome
         - io.github.equibop.Equibop
 
@@ -74,3 +71,5 @@ modules:
       - "sed -i 's|SHELL=/bin/bash|SHELL=/usr/bin/fish|' /etc/default/useradd"
       - "grep -qxF '/usr/bin/fish' /etc/shells || echo '/usr/bin/fish' >> /etc/shells"
       - "echo 'Custom image build finished successfully!'"
+      
+  - type: signing # this sets up the proper policy & signing files for signed images to work fully
