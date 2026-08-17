@@ -25,6 +25,11 @@ modules:
 
   # Install base packages
   - type: rpm-ostree
+    remove:
+      - firefox
+      - firefox-langpacks
+      - kglobalacceld
+      - kdecoration
     install:
       - kineticwe
       - noctalia-git
