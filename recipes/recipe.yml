@@ -56,7 +56,7 @@ modules:
         scope: system
         install:
         - com.google.Chrome
-        - io.github.equibop.Equibop
+        - org.equicord.equibop
 
   # 4. Install Homebrew
   - type: brew
