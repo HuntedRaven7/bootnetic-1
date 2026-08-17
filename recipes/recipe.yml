@@ -4,21 +4,23 @@ base-image: ghcr.io/ublue-os/kinoite-main
 image-version: latest
 
 modules:
-  # 1. Enable custom repositories (COPR & Terra)
-  - type: copr
+  # Enable COPR repositories using the supported dnf module
+  - type: dnf
     repos:
-      - peterwu/iosevka
-      - theblackdon/kineticwe
-      - lionheartp/Hyprland
-      - theblackdon/dcli-bootc
-      - linuxgamerlife/lgl-dnf-helper
-      - linuxgamerlife/lgl-emoji-picker
-  
-  - type: yum-repo
-    repos:
-      - https://github.com/terrapkg/subatomic-repos/raw/main/terra.repo
+      copr:
+        - peterwu/iosevka
+        - theblackdon/kineticwe
+        - lionheartp/Hyprland
+        - theblackdon/dcli-bootc
+        - linuxgamerlife/lgl-dnf-helper
+        - linuxgamerlife/lgl-emoji-picker
 
-  # 2. Base RPM packages
+  # Custom yum repositories (Terra)
+  - type: script
+    snippets:
+      - "curl -sL https://github.com/terrapkg/subatomic-repos/raw/main/terra.repo -o /etc/yum.repos.d/terra.repo"
+
+  # Install base packages
   - type: rpm-ostree
     install:
       - kineticwe
@@ -30,7 +32,7 @@ modules:
       - kitty
       - fish
       - lgl-emoji-picker
-      - lgl-dnf-helper 
+      - lgl-dnf-helper
       - iosevka-fonts
       - fastfetch
       - btop
@@ -45,7 +47,7 @@ modules:
     remove:
       - firefox
       - firefox-langpacks
-
+      
   # 3. System-wide Flatpaks
   - type: flatpak
     notify: true
