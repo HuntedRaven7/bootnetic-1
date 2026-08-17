@@ -7,7 +7,6 @@ base-image: ghcr.io/ublue-os/kinoite-main
 image-version: latest
 
 modules:
-  # Enable COPR repositories using the supported dnf module
   - type: dnf
     repos:
       copr:
@@ -18,20 +17,14 @@ modules:
         - linuxgamerlife/lgl-dnf-helper
         - linuxgamerlife/lgl-emoji-picker
 
-  # Custom yum repositories (Terra)
   - type: script
     snippets:
       - "curl -sL https://github.com/terrapkg/subatomic-repos/raw/main/terra.repo -o /etc/yum.repos.d/terra.repo"
+      # Swap/override base kwin-common with kineticwe from COPR
+      - "rpm-ostree override replace --experimental --from repo='copr:copr.fedorainfracloud.org:theblackdon:kineticwe' kwin-common || dnf swap -y kwin-common kineticwe"
 
-  # Install base packages
   - type: rpm-ostree
-    remove:
-      - firefox
-      - firefox-langpacks
-      - kglobalacceld
-      - kdecoration
     install:
-      - kineticwe
       - noctalia-git
       - qt5ct
       - qt6ct
@@ -52,6 +45,9 @@ modules:
       - haruna
       - zathura
       - neovim
+    remove:
+      - firefox
+      - firefox-langpacks
 
   # 3. System-wide Flatpaks
   - type: default-flatpaks
