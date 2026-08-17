@@ -1,4 +1,4 @@
-name: thinkpad-kinoite
+name: bootnetic
 description: Custom Fedora Kinoite image for ThinkPad T460
 base-image: ghcr.io/ublue-os/kinoite-main
 image-version: latest
