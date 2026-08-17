@@ -52,7 +52,7 @@ modules:
       - firefox-langpacks
 
   # 3. System-wide Flatpaks
-  - type: flatpak
+  - type: default-flatpaks
     notify: true
     system:
       repo-url: https://dl.flathub.org/repo/flathub.flatpakrepo
@@ -65,8 +65,10 @@ modules:
   # 4. Install Homebrew
   - type: brew
 
-  # 5. Install Nix
-  - type: nix
+  # 5. Install Nix (via script module)
+  - type: script
+    snippets:
+     - "curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install linux --init none --no-confirm"
 
   # 6. Custom scripts
   - type: script
