@@ -4,10 +4,7 @@ base-image: ghcr.io/ublue-os/kinoite-main
 image-version: latest
 
 modules:
-  # 1. Enable RPM Fusion (Free & Non-Free)
-  - type: rpm-fusion
-
-  # 2. Enable COPR Repositories
+  # 1. Enable custom repositories (COPR & Terra)
   - type: copr
     repos:
       - peterwu/iosevka
@@ -16,35 +13,25 @@ modules:
       - theblackdon/dcli-bootc
       - linuxgamerlife/lgl-dnf-helper
       - linuxgamerlife/lgl-emoji-picker
-
-  # 3. Enable Terra Repository
+  
   - type: yum-repo
     repos:
       - https://github.com/terrapkg/subatomic-repos/raw/main/terra.repo
 
-  # 4. Base RPM Packages
+  # 2. Base RPM packages
   - type: rpm-ostree
     install:
-      # Custom COPR & Terra Tools
       - kineticwe
       - noctalia-git
-      - lgl-emoji-picker
-      - lgl-dnf-helper
-
-      # Shell & Terminal
-      - fish
-      - kitty
-      
-      # Theming & Qt/GTK tools
       - qt5ct
       - qt6ct
       - nwg-look
       - adw-gtk3-theme
-           
-      # Fonts
+      - kitty
+      - fish
+      - lgl-emoji-picker
+      - lgl-dnf-helper 
       - iosevka-fonts
-
-      # CLI Utilities & Applications
       - fastfetch
       - btop
       - htop
@@ -55,19 +42,11 @@ modules:
       - haruna
       - zathura
       - neovim
-      
     remove:
-      # Remove default browser to prefer Flatpak/Chrome
       - firefox
       - firefox-langpacks
 
-  # 5. Homebrew (Linuxbrew)
-  - type: brew
-
-  # 6. Nix (Multi-user daemon & Flakes enabled)
-  - type: nix
-
-  # 7. System-wide Flatpaks
+  # 3. System-wide Flatpaks
   - type: flatpak
     notify: true
     system:
@@ -78,9 +57,15 @@ modules:
         - com.google.Chrome
         - io.github.equibop.Equibop
 
-  # 8. System Tweaks & Shell Configuration
+  # 4. Install Homebrew
+  - type: brew
+
+  # 5. Install Nix
+  - type: nix
+
+  # 6. Custom scripts
   - type: script
     snippets:
       - "sed -i 's|SHELL=/bin/bash|SHELL=/usr/bin/fish|' /etc/default/useradd"
       - "grep -qxF '/usr/bin/fish' /etc/shells || echo '/usr/bin/fish' >> /etc/shells"
-      - "echo 'Custom Kinoite image build finished successfully!'"
+      - "echo 'Custom image build finished successfully!'"
