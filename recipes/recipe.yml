@@ -1,45 +1,86 @@
----
-# yaml-language-server: $schema=https://schema.blue-build.org/recipe-v1.json
-# image will be published to ghcr.io/<user>/<name>
-name: bootnetic
-# description will be included in the image's metadata
-description: This is my personal OS image.
+name: thinkpad-kinoite
+description: Custom Fedora Kinoite image for ThinkPad T460
+base-image: ghcr.io/ublue-os/kinoite-main
+image-version: latest
 
-# the base image to build on top of (FROM) and the version tag to use
-base-image: ghcr.io/ublue-os/silverblue-main
-image-version: latest # You can pin to a specific version of Fedora as well
-
-# module configuration, executed in order
-# you can include multiple instances of the same module
 modules:
-  - type: files
-    files:
-      - source: system
-        destination: / # copies files/system/* (* means everything inside it) into your image's root folder /
+  # 1. Enable RPM Fusion (Free & Non-Free)
+  - type: rpm-fusion
 
-  - type: dnf
+  # 2. Enable COPR Repositories
+  - type: copr
     repos:
-      copr:
-        - atim/starship
+      - peterwu/iosevka
+      - theblackdon/kineticwe
+      - lionheartp/Hyprland
+      - theblackdon/dcli-bootc
+      - linuxgamerlife/lgl-dnf-helper
+      - linuxgamerlife/lgl-emoji-picker
+
+  # 3. Enable Terra Repository
+  - type: yum-repo
+    repos:
+      - https://github.com/terrapkg/subatomic-repos/raw/main/terra.repo
+
+  # 4. Base RPM Packages
+  - type: rpm-ostree
     install:
-      packages:
-        - micro
-        - starship
+      # Custom COPR & Terra Tools
+      - kineticwe
+      - noctalia-git
+      - lgl-emoji-picker
+      - lgl-dnf-helper
+
+      # Shell & Terminal
+      - fish
+      - kitty
+      
+      # Theming & Qt/GTK tools
+      - qt5ct
+      - qt6ct
+      - nwg-look
+      - adw-gtk3-theme
+           
+      # Fonts
+      - iosevka-fonts
+
+      # CLI Utilities & Applications
+      - fastfetch
+      - btop
+      - htop
+      - git
+      - zoxide
+      - eza
+      - gwenview
+      - haruna
+      - zathura
+      - neovim
+      
     remove:
-      packages:
-        # example: removing firefox (in favor of the flatpak)
-        # "firefox" is the main package, "firefox-langpacks" is a dependency
-        - firefox
-        - firefox-langpacks # also remove firefox dependency (not required for all packages, this is a special case)
+      # Remove default browser to prefer Flatpak/Chrome
+      - firefox
+      - firefox-langpacks
 
-  - type: default-flatpaks
-    configurations:
-      - notify: true # Send notification after install/uninstall is finished (true/false)
-        scope: system
-        # If no repo information is specified, Flathub will be used by default
-        install: # system flatpaks we want all users to have and not remove
-          - org.mozilla.firefox
-          - org.gnome.Loupe
-      - scope: user # Also add Flathub user repo, but no user packages
+  # 5. Homebrew (Linuxbrew)
+  - type: brew
 
-  - type: signing # this sets up the proper policy & signing files for signed images to work fully
+  # 6. Nix (Multi-user daemon & Flakes enabled)
+  - type: nix
+
+  # 7. System-wide Flatpaks
+  - type: flatpak
+    notify: true
+    system:
+      repo-url: https://dl.flathub.org/repo/flathub.flatpakrepo
+      repo-name: flathub
+      repo-description: Flathub
+      install:
+        - com.google.Chrome
+        - io.github.equibop.Equibop
+
+  # 8. System Tweaks & Shell Configuration
+  - type: script
+    snippets:
+      - "sed -i 's|SHELL=/bin/bash|SHELL=/usr/bin/fish|' /etc/default/useradd"
+      - "grep -qxF '/usr/bin/fish' /etc/shells || echo '/usr/bin/fish' >> /etc/shells"
+      - "echo 'Custom Kinoite image build finished successfully!'"
