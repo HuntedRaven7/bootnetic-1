@@ -16,6 +16,7 @@
   programs.fish = {
     enable = true;
     interactiveShellInit = ''
+      set -e LD_LIBRARY_PATH
       set gsettings (which gsettings 2>/dev/null)
       if test -n "$gsettings"
         # Nix environment integration tweaks if needed
@@ -40,6 +41,8 @@
       ll = "eza -l --icons";
       ls = "eza --icons";
       ff = "fastfetch";
+      rebuild = "home-manager switch --flake .";
+      update = "sudo bootc upgrade";
     };
   };
 xdg.configFile."fastfetch/config.jsonc".source = ./dotfiles/fastfetch.jsonc;

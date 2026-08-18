@@ -53,12 +53,12 @@
             "type": "terminal"
         },
         {
-            "key": "{#37}│ {#32}shell   {#keys}{#37}│",
+            "key": "{#37}│ {#32}shell    {#keys}{#37}│",
             "type": "shell"
         },
 	{
 	    "type": "packages",
-  	    "key": "{#37}│ {#32}packages{#keys}{#37}│",
+  	    "key": "{#37}│ {#32}packages {#keys}{#37}│",
            // "format": "{1} (nix), {2} (rpm)"
         },
         {
