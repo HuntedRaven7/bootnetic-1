@@ -1,0 +1,103 @@
+//    ______           __  ______      __
+//   / ____/___ ______/ /_/ ____/___ _/ /_
+//  / /_  / __ `/ ___/ __/ /   / __ `/ __/
+// / __/ / /_/ (__  ) /_/ /___/ /_/ / /_
+///_/    \__,_/____/\__/\____/\__,_/\__/
+//  https://github.com/m3tozz/FastCat
+{
+    "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+    "logo": {
+        "type": "auto",
+        "source": "~/BlackDon/logos/Donzzitelogo.png",
+        "width": 11,
+        "height": 8,
+        "preserveAspectRatio": false
+    },
+    "display": {
+        "separator": " "
+    },
+    "modules": [
+        {
+            "key": "{#37}╭───────────╮",
+            "type": "custom"
+        },
+        {
+            "key": "{#37}│ {#31} user    {#keys}{#37}│",
+            "type": "title",
+            "format": "{user-name}"
+        },
+        {
+            "key": "{#37}│ {#32}󰇅 hname   {#keys}{#37}│",
+            "type": "title",
+            "format": "{host-name}"
+        },
+        {
+            "key": "{#37}│ {#33}󰅐 uptime  {#keys}{#37}│",
+            "type": "uptime"
+        },
+        {
+            "key": "{#37}│ {#34}{icon} distro  {#keys}{#37}│",
+            "type": "os"
+        },
+        {
+            "key": "{#37}│ {#35} kernel  {#keys}{#37}│",
+            "type": "kernel"
+        },
+        {
+            "key": "{#37}│ {#36}󰇄 desktop {#keys}{#37}│",
+            "type": "custom",
+            "format": "KineticWE"
+        },
+        {
+            "key": "{#37}│ {#31} term    {#keys}{#37}│",
+            "type": "terminal"
+        },
+        {
+            "key": "{#37}│ {#32}shell   {#keys}{#37}│",
+            "type": "shell"
+        },
+	{
+	    "type": "packages",
+  	    "key": "{#37}│ {#32}packages{#keys}{#37}│",
+           // "format": "{1} (nix), {2} (rpm)"
+        },
+        {
+            "key": "{#37}│ {#33}󰍛 cpu     {#keys}{#37}│",
+            "type": "cpu",
+            "showPeCoreCount": true
+        },
+        {
+            "key": "{#37}│ {#34}󰢮 gpu     {#keys}{#37}│",
+            "type": "gpu"
+        },
+        {
+            "key": "{#37}│ {#34}󰉉 nvme1   {#keys}{#37}│",
+            "type": "disk",
+            "folders": "/var/home",
+            "format": "{size-used} / {size-total} ({size-percentage}) - bootnetic"
+        },
+        {
+            "key": "{#37}│ {#34}󰉉 nvme0   {#keys}{#37}│",
+            "type": "disk",
+            "folders": "/var/mnt/storage",
+            "format": "{size-used} / {size-total} ({size-percentage}) - storage"
+        },
+        {
+            "key": "{#37}│ {#35} memory  {#keys}{#37}│",
+            "type": "memory"
+        },
+        {
+            "key": "{#37}├───────────┤",
+            "type": "custom"
+        },
+        {
+            "key": "{#37}│ {#39} colors  {#keys}{#37}│",
+            "type": "colors",
+            "symbol": "circle"
+        },
+        {
+            "key": "{#37}╰───────────╯",
+            "type": "custom"
+        }
+    ]
+}
