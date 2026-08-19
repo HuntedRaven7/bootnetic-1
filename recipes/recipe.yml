@@ -1,32 +1,84 @@
+---
 # yaml-language-server: $schema=https://schema.blue-build.org/recipe-v1.json
-
 name: bootnetic
-description: Custom Fedora Kinoite image with KineticWE brew and nix
+description: Custom Fedora Kinoite image
+
 base-image: ghcr.io/ublue-os/kinoite-main
 image-version: latest
 
 modules:
-
-  # ------------------------------------------------------------
-  # Base packages
-  # ------------------------------------------------------------
-
   - type: dnf
-    install:
-      packages:
-        - curl
-        - git
-        - wget
-        - bash
-        - util-linux
-        - shadow-utils
+    repos:
+      copr:
+        - peterwu/iosevka
+        - theblackdon/kineticwe
+        - lionheartp/Hyprland
+        - linuxgamerlife/lgl-dnf-helper
+        - linuxgamerlife/lgl-emoji-picker
 
-  # ------------------------------------------------------------
-  # Nix storage
+  - type: script
+    snippets:
+      - "curl -sL https://github.com/terrapkg/subatomic-repos/raw/main/terra.repo -o /etc/yum.repos.d/terra.repo"
+      # Swap/override base kwin-common with kineticwe from COPR
+      - "rpm-ostree override replace --experimental --from repo='copr:copr.fedorainfracloud.org:theblackdon:kineticwe' kwin-common || dnf swap -y kwin-common kineticwe"
+
+  - type: rpm-ostree
+    install:
+      - noctalia-git
+      - qt5ct
+      - qt6ct
+      - nwg-look
+      - adw-gtk3-theme
+      - kitty
+      - fish
+      - lgl-emoji-picker
+      - lgl-dnf-helper
+      - iosevka-fonts
+      - fastfetch
+      - btop
+      - htop
+      - git
+      - zoxide
+      - eza
+      - gwenview
+      - haruna
+      - zathura
+      - neovim
+    remove:
+      - firefox
+      - firefox-langpacks
+
+  # 3. System-wide Flatpaks (v2 syntax)
+  - type: default-flatpaks
+    configurations:
+      - notify: false
+        scope: system
+        install:
+        - com.google.Chrome
+        - org.equicord.equibop
+
+  # 4. Install Homebrew
+  - type: brew
+
+  # ============================================================
+  # Nix bootstrap
   #
-  # /var/nix is persistent on Atomic systems.
-  # /nix is a bind mount to /var/nix.
-  # ------------------------------------------------------------
+  # Nix is NOT installed during image build.
+  #
+  # The image contains:
+  #
+  #   /var/nix
+  #       persistent Nix store
+  #
+  #   /nix
+  #       bind mount -> /var/nix
+  #
+  #   nix-firstboot.service
+  #       installs Nix after first boot
+  #
+  # This avoids running the Nix installer as root during
+  # the BlueBuild container build.
+  # ============================================================
 
   - type: script
     snippets:
@@ -34,7 +86,9 @@ modules:
       - |
         set -eux
 
-        echo "=== Preparing Nix directories ==="
+        echo "========================================"
+        echo " Preparing Nix directories"
+        echo "========================================"
 
         mkdir -p /var/nix
         mkdir -p /nix
@@ -42,7 +96,10 @@ modules:
         chmod 755 /var/nix
         chmod 755 /nix
 
-        echo "=== Creating Nix mount ==="
+
+        echo "========================================"
+        echo " Creating nix.mount"
+        echo "========================================"
 
         mkdir -p /etc/systemd/system
 
@@ -65,7 +122,10 @@ modules:
 
         systemctl enable nix.mount
 
-        echo "=== Creating Nix first-boot installer ==="
+
+        echo "========================================"
+        echo " Creating Nix first-boot installer"
+        echo "========================================"
 
         mkdir -p /usr/libexec
 
@@ -76,13 +136,24 @@ modules:
 
         MARKER="/var/lib/nix-installed"
 
+
+        # --------------------------------------------------------
+        # Already installed?
+        # --------------------------------------------------------
+
         if [[ -f "$MARKER" ]]; then
+            echo "Nix is already installed."
             exit 0
         fi
 
-        echo "=== Waiting for /nix mount ==="
 
-        for _ in {1..30}; do
+        # --------------------------------------------------------
+        # Wait for /nix mount
+        # --------------------------------------------------------
+
+        echo "Waiting for /nix mount..."
+
+        for _ in {1..60}; do
             if mountpoint -q /nix; then
                 break
             fi
@@ -91,37 +162,66 @@ modules:
         done
 
         if ! mountpoint -q /nix; then
-            echo "ERROR: /nix is not mounted"
+            echo "ERROR: /nix is not mounted."
             exit 1
         fi
 
-        echo "=== Preparing Nix build users ==="
+
+        echo "/nix is mounted."
+
+
+        # --------------------------------------------------------
+        # Prepare Nix build group
+        #
+        # The official multi-user installer also performs this
+        # setup, but creating the group beforehand makes the
+        # environment predictable.
+        # --------------------------------------------------------
+
+        echo "Preparing nixbld group..."
 
         if ! getent group nixbld >/dev/null 2>&1; then
             groupadd --system nixbld
         fi
 
-        echo "=== Creating Nix build users ==="
+
+        # --------------------------------------------------------
+        # Create Nix build users
+        # --------------------------------------------------------
+
+        echo "Creating Nix build users..."
 
         for i in $(seq 1 16); do
+
             USER="nixbld$i"
 
             if ! id "$USER" >/dev/null 2>&1; then
+
                 useradd \
                     --system \
                     --no-create-home \
                     --shell /usr/sbin/nologin \
                     --gid nixbld \
                     "$USER"
+
             fi
+
         done
 
-        echo "=== Setting Nix ownership ==="
 
-        chown root:root /nix
-        chmod 0755 /nix
+        # --------------------------------------------------------
+        # Install Nix
+        #
+        # IMPORTANT:
+        #
+        # --daemon = multi-user installation
+        #
+        # Do NOT use --no-daemon here.
+        # --------------------------------------------------------
 
-        echo "=== Installing Nix ==="
+        echo "========================================"
+        echo " Installing Nix"
+        echo "========================================"
 
         if [[ ! -x /nix/var/nix/profiles/default/bin/nix ]]; then
 
@@ -132,9 +232,20 @@ modules:
                 https://nixos.org/nix/install \
                 | sh -s -- --daemon
 
+        else
+
+            echo "Nix binary already exists."
+
         fi
 
-        echo "=== Configuring Nix ==="
+
+        # --------------------------------------------------------
+        # Configure Nix
+        # --------------------------------------------------------
+
+        echo "========================================"
+        echo " Configuring Nix"
+        echo "========================================"
 
         mkdir -p /etc/nix
 
@@ -145,11 +256,20 @@ modules:
         max-jobs = auto
         EOF
 
-        echo "=== Enabling nix-daemon ==="
 
-        systemctl enable nix-daemon.service
+        # --------------------------------------------------------
+        # Configure users
+        #
+        # Fedora Atomic stores home directories under:
+        #
+        #   /var/home/<user>
+        #
+        # We configure every normal user found there.
+        # --------------------------------------------------------
 
-        echo "=== Creating user Nix environment ==="
+        echo "========================================"
+        echo " Configuring user Nix environments"
+        echo "========================================"
 
         for user_dir in /var/home/*; do
 
@@ -157,71 +277,48 @@ modules:
 
             USER_NAME="$(basename "$user_dir")"
 
-            if id "$USER_NAME" >/dev/null 2>&1; then
 
-                USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6)"
+            if ! id "$USER_NAME" >/dev/null 2>&1; then
+                continue
+            fi
 
-                if [[ -d "$USER_HOME" ]]; then
 
-                    mkdir -p "$USER_HOME/.config/nix"
+            USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6)"
 
-                    cat > "$USER_HOME/.config/nix/nix.conf" <<'EOF'
+
+            if [[ ! -d "$USER_HOME" ]]; then
+                continue
+            fi
+
+
+            echo "Configuring Nix for user: $USER_NAME"
+            echo "Home: $USER_HOME"
+
+
+            mkdir -p "$USER_HOME/.config/nix"
+
+
+            cat > "$USER_HOME/.config/nix/nix.conf" <<'EOF'
         experimental-features = nix-command flakes
         EOF
 
-                    chown \
-                        "$USER_NAME:$(id -gn "$USER_NAME")" \
-                        "$USER_HOME/.config/nix/nix.conf"
 
-                fi
-            fi
+            chown \
+                "$USER_NAME:$(id -gn "$USER_NAME")" \
+                "$USER_HOME/.config/nix/nix.conf"
 
         done
 
-        echo "=== Nix installation completed ==="
 
-        touch "$MARKER"
+        # --------------------------------------------------------
+        # Global Nix profile
+        #
+        # This makes Nix available to login shells.
+        # --------------------------------------------------------
 
-        exit 0
-        EOF
-
-        chmod 0755 /usr/libexec/install-nix-firstboot
-
-        echo "=== Creating first-boot service ==="
-
-        cat > /etc/systemd/system/nix-firstboot.service <<'EOF'
-        [Unit]
-        Description=Install Nix on first boot
-
-        Requires=nix.mount
-        After=nix.mount
-        Before=nix-daemon.service
-
-        Wants=network-online.target
-        After=network-online.target
-
-        [Service]
-        Type=oneshot
-        ExecStart=/usr/libexec/install-nix-firstboot
-        RemainAfterExit=yes
-
-        [Install]
-        WantedBy=multi-user.target
-        EOF
-
-        systemctl enable nix-firstboot.service
-
-        echo "=== Nix first-boot configuration complete ==="
-
-  # ------------------------------------------------------------
-  # Shell environment
-  # ------------------------------------------------------------
-
-  - type: script
-    snippets:
-
-      - |
-        set -eux
+        echo "========================================"
+        echo " Creating global Nix profile"
+        echo "========================================"
 
         mkdir -p /etc/profile.d
 
@@ -232,3 +329,61 @@ modules:
         EOF
 
         chmod 644 /etc/profile.d/nix.sh
+
+
+        # --------------------------------------------------------
+        # Mark installation complete
+        # --------------------------------------------------------
+
+        echo "========================================"
+        echo " Nix installation completed"
+        echo "========================================"
+
+        touch "$MARKER"
+
+        exit 0
+        EOF
+
+        chmod 0755 /usr/libexec/install-nix-firstboot
+
+
+        echo "========================================"
+        echo " Creating nix-firstboot.service"
+        echo "========================================"
+
+        cat > /etc/systemd/system/nix-firstboot.service <<'EOF'
+        [Unit]
+        Description=Install Nix on first boot
+
+        Requires=nix.mount
+        After=nix.mount
+
+        Wants=network-online.target
+        After=network-online.target
+
+        [Service]
+        Type=oneshot
+
+        ExecStart=/usr/libexec/install-nix-firstboot
+
+        RemainAfterExit=yes
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+
+        systemctl enable nix-firstboot.service
+
+
+        echo "========================================"
+        echo " Nix first-boot configuration complete"
+        echo "========================================"
+
+  # 6. Custom scripts
+  - type: script
+    snippets:
+      - "sed -i 's|SHELL=/bin/bash|SHELL=/usr/bin/fish|' /etc/default/useradd"
+      - "grep -qxF '/usr/bin/fish' /etc/shells || echo '/usr/bin/fish' >> /etc/shells"
+      - "echo 'Custom image build finished successfully!'"
+
+  - type: signing # this sets up the proper policy & signing files for signed images to work fully
