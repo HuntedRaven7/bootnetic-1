@@ -141,9 +141,9 @@ modules:
 
         echo "=== Creating Nix first-boot installer ==="
 
-        mkdir -p /usr/local/libexec
+        mkdir -p /usr/libexec
 
-        cat > /usr/local/libexec/install-nix-firstboot <<'EOF'
+        cat > /usr/libexec/install-nix-firstboot <<'EOF'
         #!/usr/bin/env bash
 
         set -euo pipefail
@@ -203,7 +203,7 @@ modules:
         exit 0
         EOF
 
-        chmod 755 /usr/local/libexec/install-nix-firstboot
+        chmod 755 /usr/libexec/install-nix-firstboot
 
         echo "=== Creating first-boot service ==="
 
@@ -217,7 +217,7 @@ modules:
 
         [Service]
         Type=oneshot
-        ExecStart=/usr/local/libexec/install-nix-firstboot
+        ExecStart=/usr/libexec/install-nix-firstboot
         RemainAfterExit=yes
 
         [Install]
