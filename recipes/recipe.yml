@@ -63,8 +63,9 @@ modules:
   # ============================================================
   # Nix bootstrap
   # ============================================================
-type: script
-scripts:
+  type: script
+  snippets:
+
   - |
     set -eux
 
@@ -314,7 +315,6 @@ scripts:
     echo "========================================"
     echo " Nix first-boot configuration complete"
     echo "========================================"
-
 
   # 6. Custom scripts
   - type: script
