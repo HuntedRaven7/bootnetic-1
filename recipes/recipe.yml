@@ -1,110 +1,36 @@
----
 # yaml-language-server: $schema=https://schema.blue-build.org/recipe-v1.json
 
 name: bootnetic
 description: Custom Fedora Kinoite image with KineticWE brew and nix
-
 base-image: ghcr.io/ublue-os/kinoite-main
 image-version: latest
 
 modules:
+
   # ------------------------------------------------------------
-  # COPR repositories
+  # Base packages
   # ------------------------------------------------------------
+
   - type: dnf
-    repos:
-      copr:
-        - peterwu/iosevka
-        - theblackdon/kineticwe
-        - lionheartp/Hyprland
-        - linuxgamerlife/lgl-dnf-helper
-        - linuxgamerlife/lgl-emoji-picker
-
-  # ------------------------------------------------------------
-  # Terra repository + KineticWE
-  # ------------------------------------------------------------
-  - type: script
-    snippets:
-      - |
-        set -eux
-
-        curl -sL \
-          https://github.com/terrapkg/subatomic-repos/raw/main/terra.repo \
-          -o /etc/yum.repos.d/terra.repo
-
-        rpm-ostree override replace \
-          --experimental \
-          --from repo='copr:copr.fedorainfracloud.org:theblackdon:kineticwe' \
-          kwin-common \
-          || dnf swap -y kwin-common kineticwe
-
-  # ------------------------------------------------------------
-  # RPM packages
-  # ------------------------------------------------------------
-  - type: rpm-ostree
     install:
-      - noctalia-git
-      - qt5ct
-      - qt6ct
-      - nwg-look
-      - adw-gtk3-theme
-      - kitty
-      - fish
-      - lgl-emoji-picker
-      - lgl-dnf-helper
-      - iosevka-fonts
-      - fastfetch
-      - btop
-      - htop
-      - git
-      - zoxide
-      - eza
-      - gwenview
-      - haruna
-      - zathura
-      - neovim
-      - libcurl
-      - ncurses
-
-    remove:
-      - firefox
-      - firefox-langpacks
+      packages:
+        - curl
+        - git
+        - wget
+        - bash
+        - util-linux
+        - shadow-utils
 
   # ------------------------------------------------------------
-  # System Flatpaks
+  # Nix storage
+  #
+  # /var/nix is persistent on Atomic systems.
+  # /nix is a bind mount to /var/nix.
   # ------------------------------------------------------------
-  - type: default-flatpaks
-    configurations:
-      - notify: false
-        scope: system
-        install:
-          - com.google.Chrome
-          - org.equicord.equibop
-          - org.gtk.Gtk3theme.adw-gtk3
-          - org.gtk.Gtk3theme.adw-gtk3-dark
 
-  # ------------------------------------------------------------
-  # Homebrew
-  # ------------------------------------------------------------
-  - type: brew
-
-  # ------------------------------------------------------------
-  # Prepare Nix
-  #
-  # Nix is NOT installed during image build.
-  #
-  # The official installer does not support being executed as
-  # root inside the BlueBuild build environment.
-  #
-  # Instead we:
-  #
-  #   /var/nix  -> persistent Nix storage
-  #   /nix      -> bind mount
-  #
-  # and install Nix automatically on the first boot.
-  # ------------------------------------------------------------
   - type: script
     snippets:
+
       - |
         set -eux
 
@@ -154,66 +80,125 @@ modules:
             exit 0
         fi
 
-        # Wait until /nix is actually mounted.
+        echo "=== Waiting for /nix mount ==="
+
+        for _ in {1..30}; do
+            if mountpoint -q /nix; then
+                break
+            fi
+
+            sleep 1
+        done
+
         if ! mountpoint -q /nix; then
+            echo "ERROR: /nix is not mounted"
             exit 1
         fi
 
-        # Find the first normal user.
-        USER_NAME=""
+        echo "=== Preparing Nix build users ==="
 
-        while IFS=: read -r username _ uid _ _ home shell; do
-            if [[ "$uid" -ge 1000 && "$uid" -lt 60000 ]]; then
-                if [[ "$shell" != "/usr/sbin/nologin" && \
-                      "$shell" != "/sbin/nologin" ]]; then
-                    USER_NAME="$username"
-                    break
+        if ! getent group nixbld >/dev/null 2>&1; then
+            groupadd --system nixbld
+        fi
+
+        echo "=== Creating Nix build users ==="
+
+        for i in $(seq 1 16); do
+            USER="nixbld$i"
+
+            if ! id "$USER" >/dev/null 2>&1; then
+                useradd \
+                    --system \
+                    --no-create-home \
+                    --shell /usr/sbin/nologin \
+                    --gid nixbld \
+                    "$USER"
+            fi
+        done
+
+        echo "=== Setting Nix ownership ==="
+
+        chown root:root /nix
+        chmod 0755 /nix
+
+        echo "=== Installing Nix ==="
+
+        if [[ ! -x /nix/var/nix/profiles/default/bin/nix ]]; then
+
+            curl \
+                --proto '=https' \
+                --tlsv1.2 \
+                -L \
+                https://nixos.org/nix/install \
+                | sh -s -- --daemon
+
+        fi
+
+        echo "=== Configuring Nix ==="
+
+        mkdir -p /etc/nix
+
+        cat > /etc/nix/nix.conf <<'EOF'
+        experimental-features = nix-command flakes
+        build-users-group = nixbld
+        auto-optimise-store = true
+        max-jobs = auto
+        EOF
+
+        echo "=== Enabling nix-daemon ==="
+
+        systemctl enable nix-daemon.service
+
+        echo "=== Creating user Nix environment ==="
+
+        for user_dir in /var/home/*; do
+
+            [[ -d "$user_dir" ]] || continue
+
+            USER_NAME="$(basename "$user_dir")"
+
+            if id "$USER_NAME" >/dev/null 2>&1; then
+
+                USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6)"
+
+                if [[ -d "$USER_HOME" ]]; then
+
+                    mkdir -p "$USER_HOME/.config/nix"
+
+                    cat > "$USER_HOME/.config/nix/nix.conf" <<'EOF'
+        experimental-features = nix-command flakes
+        EOF
+
+                    chown \
+                        "$USER_NAME:$(id -gn "$USER_NAME")" \
+                        "$USER_HOME/.config/nix/nix.conf"
+
                 fi
             fi
-        done < /etc/passwd
 
-        if [[ -z "$USER_NAME" ]]; then
-            echo "No normal user found yet."
-            exit 1
-        fi
+        done
 
-        USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6)"
-
-        echo "Installing Nix for user: $USER_NAME"
-        echo "Home: $USER_HOME"
-
-        # The official installer must not be executed as root.
-        runuser -u "$USER_NAME" -- bash -c '
-          set -e
-
-          if command -v nix >/dev/null 2>&1; then
-            exit 0
-          fi
-
-          curl --proto "=https" \
-            --tlsv1.2 \
-            -L \
-            https://nixos.org/nix/install \
-            | sh -s -- --no-daemon
-        '
+        echo "=== Nix installation completed ==="
 
         touch "$MARKER"
 
-        echo "Nix installation completed."
         exit 0
         EOF
 
-        chmod 755 /usr/libexec/install-nix-firstboot
+        chmod 0755 /usr/libexec/install-nix-firstboot
 
         echo "=== Creating first-boot service ==="
 
         cat > /etc/systemd/system/nix-firstboot.service <<'EOF'
         [Unit]
         Description=Install Nix on first boot
-        After=nix.mount
+
         Requires=nix.mount
-        After=network-online.target
+        After=nix.mount
+        Before=nix-daemon.service
+
         Wants=network-online.target
+        After=network-online.target
 
         [Service]
         Type=oneshot
@@ -229,23 +214,21 @@ modules:
         echo "=== Nix first-boot configuration complete ==="
 
   # ------------------------------------------------------------
-  # Custom system configuration
+  # Shell environment
   # ------------------------------------------------------------
+
   - type: script
     snippets:
+
       - |
         set -eux
 
-        sed -i \
-          's|SHELL=/bin/bash|SHELL=/usr/bin/fish|' \
-          /etc/default/useradd
+        mkdir -p /etc/profile.d
 
-        grep -qxF '/usr/bin/fish' /etc/shells || \
-          echo '/usr/bin/fish' >> /etc/shells
+        cat > /etc/profile.d/nix.sh <<'EOF'
+        if [ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
+            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+        fi
+        EOF
 
-        echo "Custom image build finished successfully!"
-
-  # ------------------------------------------------------------
-  # Signing
-  # ------------------------------------------------------------
-  - type: signing
+        chmod 644 /etc/profile.d/nix.sh
