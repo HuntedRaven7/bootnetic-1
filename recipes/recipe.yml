@@ -62,22 +62,6 @@ modules:
 
   # ============================================================
   # Nix bootstrap
-  #
-  # Nix is NOT installed during image build.
-  #
-  # The image contains:
-  #
-  #   /var/nix
-  #       persistent Nix store
-  #
-  #   /nix
-  #       bind mount -> /var/nix
-  #
-  #   nix-firstboot.service
-  #       installs Nix after first boot
-  #
-  # This avoids running the Nix installer as root during
-  # the BlueBuild container build.
   # ============================================================
 
   - type: script
@@ -103,7 +87,7 @@ modules:
 
         mkdir -p /etc/systemd/system
 
-        cat > /etc/systemd/system/nix.mount <<'EOF'
+        cat > /etc/systemd/system/nix.mount <<'NIXMOUNT'
         [Unit]
         Description=Bind mount /var/nix to /nix
         Before=local-fs.target
@@ -118,7 +102,7 @@ modules:
 
         [Install]
         WantedBy=local-fs.target
-        EOF
+        NIXMOUNT
 
         systemctl enable nix.mount
 
@@ -129,7 +113,7 @@ modules:
 
         mkdir -p /usr/libexec
 
-        cat > /usr/libexec/install-nix-firstboot <<'EOF'
+        cat > /usr/libexec/install-nix-firstboot <<'NIXINSTALL'
         #!/usr/bin/env bash
 
         set -euo pipefail
@@ -148,7 +132,7 @@ modules:
 
 
         # --------------------------------------------------------
-        # Wait for /nix mount
+        # Wait for /nix
         # --------------------------------------------------------
 
         echo "Waiting for /nix mount..."
@@ -166,45 +150,29 @@ modules:
             exit 1
         fi
 
-
         echo "/nix is mounted."
 
 
         # --------------------------------------------------------
-        # Prepare Nix build group
-        #
-        # The official multi-user installer also performs this
-        # setup, but creating the group beforehand makes the
-        # environment predictable.
+        # Network
         # --------------------------------------------------------
 
-        echo "Preparing nixbld group..."
+        echo "Checking network..."
 
-        if ! getent group nixbld >/dev/null 2>&1; then
-            groupadd --system nixbld
-        fi
+        for _ in {1..60}; do
 
+            if curl \
+                --silent \
+                --fail \
+                --max-time 5 \
+                https://nixos.org/ \
+                >/dev/null 2>&1; then
 
-        # --------------------------------------------------------
-        # Create Nix build users
-        # --------------------------------------------------------
-
-        echo "Creating Nix build users..."
-
-        for i in $(seq 1 16); do
-
-            USER="nixbld$i"
-
-            if ! id "$USER" >/dev/null 2>&1; then
-
-                useradd \
-                    --system \
-                    --no-create-home \
-                    --shell /usr/sbin/nologin \
-                    --gid nixbld \
-                    "$USER"
+                break
 
             fi
+
+            sleep 2
 
         done
 
@@ -215,8 +183,6 @@ modules:
         # IMPORTANT:
         #
         # --daemon = multi-user installation
-        #
-        # Do NOT use --no-daemon here.
         # --------------------------------------------------------
 
         echo "========================================"
@@ -228,13 +194,14 @@ modules:
             curl \
                 --proto '=https' \
                 --tlsv1.2 \
-                -L \
+                --fail \
+                --location \
                 https://nixos.org/nix/install \
                 | sh -s -- --daemon
 
         else
 
-            echo "Nix binary already exists."
+            echo "Nix already exists."
 
         fi
 
@@ -249,86 +216,98 @@ modules:
 
         mkdir -p /etc/nix
 
-        cat > /etc/nix/nix.conf <<'EOF'
+        cat > /etc/nix/nix.conf <<'NIXCONF'
         experimental-features = nix-command flakes
-        build-users-group = nixbld
         auto-optimise-store = true
         max-jobs = auto
-        EOF
+        NIXCONF
 
 
         # --------------------------------------------------------
-        # Configure users
-        #
-        # Fedora Atomic stores home directories under:
-        #
-        #   /var/home/<user>
-        #
-        # We configure every normal user found there.
+        # Global shell environment
         # --------------------------------------------------------
-
-        echo "========================================"
-        echo " Configuring user Nix environments"
-        echo "========================================"
-
-        for user_dir in /var/home/*; do
-
-            [[ -d "$user_dir" ]] || continue
-
-            USER_NAME="$(basename "$user_dir")"
-
-
-            if ! id "$USER_NAME" >/dev/null 2>&1; then
-                continue
-            fi
-
-
-            USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6)"
-
-
-            if [[ ! -d "$USER_HOME" ]]; then
-                continue
-            fi
-
-
-            echo "Configuring Nix for user: $USER_NAME"
-            echo "Home: $USER_HOME"
-
-
-            mkdir -p "$USER_HOME/.config/nix"
-
-
-            cat > "$USER_HOME/.config/nix/nix.conf" <<'EOF'
-        experimental-features = nix-command flakes
-        EOF
-
-
-            chown \
-                "$USER_NAME:$(id -gn "$USER_NAME")" \
-                "$USER_HOME/.config/nix/nix.conf"
-
-        done
-
-
-        # --------------------------------------------------------
-        # Global Nix profile
-        #
-        # This makes Nix available to login shells.
-        # --------------------------------------------------------
-
-        echo "========================================"
-        echo " Creating global Nix profile"
-        echo "========================================"
 
         mkdir -p /etc/profile.d
 
-        cat > /etc/profile.d/nix.sh <<'EOF'
+        cat > /etc/profile.d/nix.sh <<'NIXPROFILE'
         if [ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
             . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
         fi
-        EOF
+        NIXPROFILE
 
         chmod 644 /etc/profile.d/nix.sh
+
+
+        # --------------------------------------------------------
+        # Configure normal users
+        # --------------------------------------------------------
+
+        echo "========================================"
+        echo " Configuring users"
+        echo "========================================"
+
+        while IFS=: read -r USERNAME _ UID _ _ HOME SHELL; do
+
+            if [[ "$UID" -lt 1000 || "$UID" -ge 60000 ]]; then
+                continue
+            fi
+
+            if [[ "$SHELL" == "/usr/sbin/nologin" ]]; then
+                continue
+            fi
+
+            if [[ "$SHELL" == "/sbin/nologin" ]]; then
+                continue
+            fi
+
+            if [[ ! -d "$HOME" ]]; then
+                continue
+            fi
+
+            echo "Configuring Nix for: $USERNAME"
+
+            mkdir -p "$HOME/.config/nix"
+
+            cat > "$HOME/.config/nix/nix.conf" <<'USERNIX'
+        experimental-features = nix-command flakes
+        USERNIX
+
+            chown \
+                "$USERNAME:$(id -gn "$USERNAME")" \
+                "$HOME/.config/nix"
+
+            chown \
+                "$USERNAME:$(id -gn "$USERNAME")" \
+                "$HOME/.config/nix/nix.conf"
+
+        done < /etc/passwd
+
+
+        # --------------------------------------------------------
+        # Reload systemd
+        #
+        # The Nix installer creates nix-daemon.service.
+        # --------------------------------------------------------
+
+        echo "========================================"
+        echo " Reloading systemd"
+        echo "========================================"
+
+        systemctl daemon-reload
+
+
+        # --------------------------------------------------------
+        # Enable daemon if it exists
+        # --------------------------------------------------------
+
+        if systemctl list-unit-files \
+            --no-legend \
+            nix-daemon.service \
+            >/dev/null 2>&1; then
+
+            systemctl enable nix-daemon.service || true
+
+        fi
 
 
         # --------------------------------------------------------
@@ -339,19 +318,20 @@ modules:
         echo " Nix installation completed"
         echo "========================================"
 
+        mkdir -p /var/lib
+
         touch "$MARKER"
 
         exit 0
-        EOF
+        NIXINSTALL
 
         chmod 0755 /usr/libexec/install-nix-firstboot
-
 
         echo "========================================"
         echo " Creating nix-firstboot.service"
         echo "========================================"
 
-        cat > /etc/systemd/system/nix-firstboot.service <<'EOF'
+        cat > /etc/systemd/system/nix-firstboot.service <<'NIXFIRSTBOOT'
         [Unit]
         Description=Install Nix on first boot
 
@@ -363,17 +343,14 @@ modules:
 
         [Service]
         Type=oneshot
-
         ExecStart=/usr/libexec/install-nix-firstboot
-
         RemainAfterExit=yes
 
         [Install]
         WantedBy=multi-user.target
-        EOF
+        NIXFIRSTBOOT
 
         systemctl enable nix-firstboot.service
-
 
         echo "========================================"
         echo " Nix first-boot configuration complete"
