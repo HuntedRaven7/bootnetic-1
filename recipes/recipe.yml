@@ -63,298 +63,258 @@ modules:
   # ============================================================
   # Nix bootstrap
   # ============================================================
+type: script
+scripts:
+  - |
+    set -eux
 
-  - type: script
-    snippets:
+    echo "========================================"
+    echo " Preparing Nix directories"
+    echo "========================================"
 
-      - |
-        set -eux
+    mkdir -p /var/nix
+    mkdir -p /nix
+    mkdir -p /var/lib
 
-        echo "========================================"
-        echo " Preparing Nix directories"
-        echo "========================================"
+    chmod 755 /var/nix
+    chmod 755 /nix
 
-        mkdir -p /var/nix
-        mkdir -p /nix
+    echo "========================================"
+    echo " Creating Nix bind mount"
+    echo "========================================"
 
-        chmod 755 /var/nix
-        chmod 755 /nix
+    mkdir -p /etc/systemd/system
 
+    cat > /etc/systemd/system/nix.mount <<'EOF'
+    [Unit]
+    Description=Bind mount /var/nix to /nix
+    Before=local-fs.target
+    After=local-fs-pre.target
+    Wants=local-fs-pre.target
 
-        echo "========================================"
-        echo " Creating nix.mount"
-        echo "========================================"
+    [Mount]
+    What=/var/nix
+    Where=/nix
+    Type=none
+    Options=bind
 
-        mkdir -p /etc/systemd/system
+    [Install]
+    WantedBy=local-fs.target
+    EOF
 
-        cat > /etc/systemd/system/nix.mount <<'NIXMOUNT'
-        [Unit]
-        Description=Bind mount /var/nix to /nix
-        Before=local-fs.target
-        After=local-fs-pre.target
-        Wants=local-fs-pre.target
+    systemctl enable nix.mount
 
-        [Mount]
-        What=/var/nix
-        Where=/nix
-        Type=none
-        Options=bind
+    echo "========================================"
+    echo " Creating Nix installer"
+    echo "========================================"
 
-        [Install]
-        WantedBy=local-fs.target
-        NIXMOUNT
+    mkdir -p /usr/local/libexec
 
-        systemctl enable nix.mount
+    cat > /usr/local/libexec/install-nix-firstboot <<'EOF'
+    #!/usr/bin/env bash
 
+    set -euo pipefail
 
-        echo "========================================"
-        echo " Creating Nix first-boot installer"
-        echo "========================================"
+    MARKER="/var/lib/nix-installed"
 
-        mkdir -p /usr/libexec
+    echo "========================================"
+    echo " Nix first-boot installer"
+    echo "========================================"
 
-        cat > /usr/libexec/install-nix-firstboot <<'NIXINSTALL'
-        #!/usr/bin/env bash
+    if [[ -f "$MARKER" ]]; then
+        echo "Nix is already installed."
+        exit 0
+    fi
 
-        set -euo pipefail
+    echo "Waiting for /nix mount..."
 
-        MARKER="/var/lib/nix-installed"
-
-
-        # --------------------------------------------------------
-        # Already installed?
-        # --------------------------------------------------------
-
-        if [[ -f "$MARKER" ]]; then
-            echo "Nix is already installed."
-            exit 0
+    for _ in {1..60}; do
+        if mountpoint -q /nix; then
+            break
         fi
 
+        sleep 1
+    done
 
-        # --------------------------------------------------------
-        # Wait for /nix
-        # --------------------------------------------------------
+    if ! mountpoint -q /nix; then
+        echo "ERROR: /nix is not mounted."
+        exit 1
+    fi
 
-        echo "Waiting for /nix mount..."
+    echo "/nix is mounted."
 
-        for _ in {1..60}; do
-            if mountpoint -q /nix; then
-                break
-            fi
+    echo "Checking network..."
 
-            sleep 1
-        done
-
-        if ! mountpoint -q /nix; then
-            echo "ERROR: /nix is not mounted."
-            exit 1
+    for _ in {1..60}; do
+        if curl \
+            --silent \
+            --show-error \
+            --fail \
+            --connect-timeout 5 \
+            --max-time 10 \
+            https://nixos.org/ \
+            >/dev/null 2>&1; then
+            break
         fi
 
-        echo "/nix is mounted."
+        sleep 2
+    done
 
+    if ! curl \
+        --silent \
+        --show-error \
+        --fail \
+        --connect-timeout 5 \
+        --max-time 10 \
+        https://nixos.org/ \
+        >/dev/null 2>&1; then
 
-        # --------------------------------------------------------
-        # Network
-        # --------------------------------------------------------
+        echo "ERROR: Network is unavailable."
+        exit 1
+    fi
 
-        echo "Checking network..."
+    echo "Network is available."
 
-        for _ in {1..60}; do
+    echo "========================================"
+    echo " Finding normal user"
+    echo "========================================"
 
-            if curl \
-                --silent \
-                --fail \
-                --max-time 5 \
-                https://nixos.org/ \
-                >/dev/null 2>&1; then
+    USER_NAME=""
 
+    while IFS=: read -r username _ uid _ _ home shell; do
+        if [[ "$uid" -ge 1000 && "$uid" -lt 60000 ]]; then
+            if [[ "$shell" != "/usr/sbin/nologin" ]] && \
+               [[ "$shell" != "/sbin/nologin" ]]; then
+
+                USER_NAME="$username"
+                USER_HOME="$home"
                 break
-
             fi
+        fi
+    done < /etc/passwd
 
-            sleep 2
+    if [[ -z "$USER_NAME" ]]; then
+        echo "ERROR: No normal user found."
+        exit 1
+    fi
 
-        done
+    if [[ -z "${USER_HOME:-}" ]]; then
+        USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6)"
+    fi
 
+    echo "User: $USER_NAME"
+    echo "Home: $USER_HOME"
 
-        # --------------------------------------------------------
-        # Install Nix
-        #
-        # IMPORTANT:
-        #
-        # --daemon = multi-user installation
-        # --------------------------------------------------------
+    echo "========================================"
+    echo " Preparing /nix permissions"
+    echo "========================================"
 
-        echo "========================================"
-        echo " Installing Nix"
-        echo "========================================"
+    chown -R "$USER_NAME:$USER_NAME" /var/nix
 
-        if [[ ! -x /nix/var/nix/profiles/default/bin/nix ]]; then
+    chmod 755 /var/nix
+    chmod 755 /nix
+
+    echo "========================================"
+    echo " Installing Nix"
+    echo "========================================"
+
+    runuser -u "$USER_NAME" -- \
+        env \
+            HOME="$USER_HOME" \
+            USER="$USER_NAME" \
+            LOGNAME="$USER_NAME" \
+            SHELL=/bin/bash \
+            PATH=/usr/local/bin:/usr/bin:/bin \
+        bash -c '
+            set -euo pipefail
+
+            export HOME="$HOME"
+            export USER="$USER"
+            export LOGNAME="$LOGNAME"
+
+            echo "Running Nix installer as:"
+            echo "  USER=$USER"
+            echo "  HOME=$HOME"
+
+            if command -v nix >/dev/null 2>&1; then
+                echo "Nix command already exists."
+                exit 0
+            fi
 
             curl \
-                --proto '=https' \
+                --proto "=https" \
                 --tlsv1.2 \
                 --fail \
-                --location \
+                --silent \
+                --show-error \
+                -L \
                 https://nixos.org/nix/install \
-                | sh -s -- --daemon
+                | sh -s -- --no-daemon
+        '
 
-        else
+    echo "========================================"
+    echo " Verifying Nix installation"
+    echo "========================================"
 
-            echo "Nix already exists."
-
-        fi
-
-
-        # --------------------------------------------------------
-        # Configure Nix
-        # --------------------------------------------------------
-
-        echo "========================================"
-        echo " Configuring Nix"
-        echo "========================================"
-
-        mkdir -p /etc/nix
-
-        cat > /etc/nix/nix.conf <<'NIXCONF'
-        experimental-features = nix-command flakes
-        auto-optimise-store = true
-        max-jobs = auto
-        NIXCONF
-
-
-        # --------------------------------------------------------
-        # Global shell environment
-        # --------------------------------------------------------
-
-        mkdir -p /etc/profile.d
-
-        cat > /etc/profile.d/nix.sh <<'NIXPROFILE'
-        if [ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
-            . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-        fi
-        NIXPROFILE
-
-        chmod 644 /etc/profile.d/nix.sh
-
-
-        # --------------------------------------------------------
-        # Configure normal users
-        # --------------------------------------------------------
-
-        echo "========================================"
-        echo " Configuring users"
-        echo "========================================"
-
-        while IFS=: read -r USERNAME _ UID _ _ HOME SHELL; do
-
-            if [[ "$UID" -lt 1000 || "$UID" -ge 60000 ]]; then
-                continue
+    if ! runuser -u "$USER_NAME" -- \
+        env \
+            HOME="$USER_HOME" \
+            USER="$USER_NAME" \
+            LOGNAME="$USER_NAME" \
+            SHELL=/bin/bash \
+            PATH="$USER_HOME/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin" \
+        bash -c '
+            if [[ -x "$HOME/.nix-profile/bin/nix" ]]; then
+                "$HOME/.nix-profile/bin/nix" --version
+            else
+                echo "ERROR: Nix executable was not found."
+                exit 1
             fi
+        '
+    then
+        echo "ERROR: Nix installation verification failed."
+        exit 1
+    fi
 
-            if [[ "$SHELL" == "/usr/sbin/nologin" ]]; then
-                continue
-            fi
+    echo "========================================"
+    echo " Nix installation successful"
+    echo "========================================"
 
-            if [[ "$SHELL" == "/sbin/nologin" ]]; then
-                continue
-            fi
+    touch "$MARKER"
 
-            if [[ ! -d "$HOME" ]]; then
-                continue
-            fi
+    exit 0
+    EOF
 
-            echo "Configuring Nix for: $USERNAME"
+    chmod 755 /usr/local/libexec/install-nix-firstboot
 
-            mkdir -p "$HOME/.config/nix"
+    echo "========================================"
+    echo " Creating first-boot service"
+    echo "========================================"
 
-            cat > "$HOME/.config/nix/nix.conf" <<'USERNIX'
-        experimental-features = nix-command flakes
-        USERNIX
+    cat > /etc/systemd/system/nix-firstboot.service <<'EOF'
+    [Unit]
+    Description=Install Nix on first boot
 
-            chown \
-                "$USERNAME:$(id -gn "$USERNAME")" \
-                "$HOME/.config/nix"
+    Requires=nix.mount
+    After=nix.mount
+    Wants=network-online.target
+    After=network-online.target
 
-            chown \
-                "$USERNAME:$(id -gn "$USERNAME")" \
-                "$HOME/.config/nix/nix.conf"
+    [Service]
+    Type=oneshot
+    ExecStart=/usr/local/libexec/install-nix-firstboot
+    RemainAfterExit=yes
 
-        done < /etc/passwd
+    [Install]
+    WantedBy=multi-user.target
+    EOF
 
+    systemctl enable nix-firstboot.service
 
-        # --------------------------------------------------------
-        # Reload systemd
-        #
-        # The Nix installer creates nix-daemon.service.
-        # --------------------------------------------------------
+    echo "========================================"
+    echo " Nix first-boot configuration complete"
+    echo "========================================"
 
-        echo "========================================"
-        echo " Reloading systemd"
-        echo "========================================"
-
-        systemctl daemon-reload
-
-
-        # --------------------------------------------------------
-        # Enable daemon if it exists
-        # --------------------------------------------------------
-
-        if systemctl list-unit-files \
-            --no-legend \
-            nix-daemon.service \
-            >/dev/null 2>&1; then
-
-            systemctl enable nix-daemon.service || true
-
-        fi
-
-
-        # --------------------------------------------------------
-        # Mark installation complete
-        # --------------------------------------------------------
-
-        echo "========================================"
-        echo " Nix installation completed"
-        echo "========================================"
-
-        mkdir -p /var/lib
-
-        touch "$MARKER"
-
-        exit 0
-        NIXINSTALL
-
-        chmod 0755 /usr/libexec/install-nix-firstboot
-
-        echo "========================================"
-        echo " Creating nix-firstboot.service"
-        echo "========================================"
-
-        cat > /etc/systemd/system/nix-firstboot.service <<'NIXFIRSTBOOT'
-        [Unit]
-        Description=Install Nix on first boot
-
-        Requires=nix.mount
-        After=nix.mount
-
-        Wants=network-online.target
-        After=network-online.target
-
-        [Service]
-        Type=oneshot
-        ExecStart=/usr/libexec/install-nix-firstboot
-        RemainAfterExit=yes
-
-        [Install]
-        WantedBy=multi-user.target
-        NIXFIRSTBOOT
-
-        systemctl enable nix-firstboot.service
-
-        echo "========================================"
-        echo " Nix first-boot configuration complete"
-        echo "========================================"
 
   # 6. Custom scripts
   - type: script
