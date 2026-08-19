@@ -1,28 +1,46 @@
 ---
 # yaml-language-server: $schema=https://schema.blue-build.org/recipe-v1.json
+
 name: bootnetic
-description: Custom Fedora Kinoite image for ThinkPad T460
+description: Custom Fedora Kinoite image utilizing KineticWE and nix home-manager
 
 base-image: ghcr.io/ublue-os/kinoite-main
 image-version: latest
 
 modules:
+  # ------------------------------------------------------------
+  # COPR repositories
+  # ------------------------------------------------------------
   - type: dnf
     repos:
       copr:
         - peterwu/iosevka
         - theblackdon/kineticwe
         - lionheartp/Hyprland
-        - theblackdon/dcli-bootc
         - linuxgamerlife/lgl-dnf-helper
         - linuxgamerlife/lgl-emoji-picker
 
+  # ------------------------------------------------------------
+  # Terra repository + KineticWE kwin-common override
+  # ------------------------------------------------------------
   - type: script
     snippets:
-      - "curl -sL https://github.com/terrapkg/subatomic-repos/raw/main/terra.repo -o /etc/yum.repos.d/terra.repo"
-      # Swap/override base kwin-common with kineticwe from COPR
-      - "rpm-ostree override replace --experimental --from repo='copr:copr.fedorainfracloud.org:theblackdon:kineticwe' kwin-common || dnf swap -y kwin-common kineticwe"
+      - |
+        set -eux
 
+        curl -sL \
+          https://github.com/terrapkg/subatomic-repos/raw/main/terra.repo \
+          -o /etc/yum.repos.d/terra.repo
+
+        rpm-ostree override replace \
+          --experimental \
+          --from repo='copr:copr.fedorainfracloud.org:theblackdon:kineticwe' \
+          kwin-common \
+          || dnf swap -y kwin-common kineticwe
+
+  # ------------------------------------------------------------
+  # RPM packages
+  # ------------------------------------------------------------
   - type: rpm-ostree
     install:
       - noctalia-git
@@ -45,32 +63,108 @@ modules:
       - haruna
       - zathura
       - neovim
+      - libcurl
+      - ncurses
+
     remove:
       - firefox
       - firefox-langpacks
 
-  # 3. System-wide Flatpaks (v2 syntax)
+  # ------------------------------------------------------------
+  # System Flatpaks
+  # ------------------------------------------------------------
   - type: default-flatpaks
     configurations:
       - notify: false
         scope: system
         install:
-        - com.google.Chrome
-        - org.equicord.equibop
+          - com.google.Chrome
+          - org.equicord.equibop
+          - org.gtk.Gtk3theme.adw-gtk3
+          - org.gtk.Gtk3theme.adw-gtk3-dark
 
-  # 4. Install Homebrew
+  # ------------------------------------------------------------
+  # Homebrew
+  # ------------------------------------------------------------
   - type: brew
 
-  # 5. Install Nix (via script module)
+  # ------------------------------------------------------------
+  # Nix
+  #
+  # Keep the Nix store under /var/nix because Kinoite uses an
+  # immutable / filesystem.
+  #
+  # /var/nix -> /nix is exposed through a systemd bind mount.
+  # ------------------------------------------------------------
   - type: script
     snippets:
-     - "curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install linux --init none --no-confirm"
+      - |
+        set -eux
 
-  # 6. Custom scripts
+        echo "=== Preparing Nix ==="
+
+        # SELinux can interfere with the Nix installer during
+        # the image build.
+        setenforce 0 || true
+
+        # Persistent Nix storage.
+        mkdir -p /var/nix
+
+        # Required by the Nix installer.
+        mkdir -p /nix
+
+        echo "=== Installing Nix ==="
+
+        curl --proto '=https' \
+          --tlsv1.2 \
+          -L \
+          https://nixos.org/nix/install \
+          | sh -s -- --no-daemon
+
+        echo "=== Creating Nix systemd mount ==="
+
+        mkdir -p /etc/systemd/system
+
+        cat > /etc/systemd/system/nix.mount <<'EOF'
+        [Unit]
+        Description=Bind mount /var/nix to /nix
+        Before=nix-daemon.service
+        After=local-fs-pre.target
+        Wants=local-fs-pre.target
+
+        [Mount]
+        What=/var/nix
+        Where=/nix
+        Type=none
+        Options=bind
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+
+        systemctl enable nix.mount
+
+        echo "=== Nix setup complete ==="
+
+  # ------------------------------------------------------------
+  # Custom system configuration
+  # ------------------------------------------------------------
   - type: script
     snippets:
-      - "sed -i 's|SHELL=/bin/bash|SHELL=/usr/bin/fish|' /etc/default/useradd"
-      - "grep -qxF '/usr/bin/fish' /etc/shells || echo '/usr/bin/fish' >> /etc/shells"
-      - "echo 'Custom image build finished successfully!'"
+      - |
+        set -eux
 
-  - type: signing # this sets up the proper policy & signing files for signed images to work fully
+        # Use fish as the default shell for newly created users.
+        sed -i \
+          's|SHELL=/bin/bash|SHELL=/usr/bin/fish|' \
+          /etc/default/useradd
+
+        grep -qxF '/usr/bin/fish' /etc/shells || \
+          echo '/usr/bin/fish' >> /etc/shells
+
+        echo "Custom image build finished successfully!"
+
+  # ------------------------------------------------------------
+  # Signing
+  # ------------------------------------------------------------
+  - type: signing
