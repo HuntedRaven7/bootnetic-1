@@ -46,6 +46,7 @@
     };
   };
 xdg.configFile."fastfetch/config.jsonc".source = ./dotfiles/fastfetch.jsonc;
+xdg.configFile."fastfetch/logo.png".source = ./dotfiles/logo.png;
 
   # --- Kitty Terminal Configuration ---
 xdg.configFile."kitty/noctalia.conf".source = ./dotfiles/kittytheme.conf;
