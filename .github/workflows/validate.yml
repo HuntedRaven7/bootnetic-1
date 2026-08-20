@@ -1,0 +1,65 @@
+name: validate
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install pre-commit and shellcheck
+        run: |
+          python3 -m pip install --upgrade pip pre-commit
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Pre-commit hooks
+        uses: pre-commit/action@v3.0.1
+
+      - name: Shellcheck custom scripts
+        run: find files -iname '*.sh' -type f -print0 | xargs -0 -r shellcheck
+
+      - name: Validate BlueBuild recipes
+        run: |
+          python3 - <<'PY'
+          import sys, glob, yaml
+          ok = True
+          for p in glob.glob("recipes/*.yml"):
+              with open(p) as fh:
+                  data = yaml.safe_load(fh)
+              if not isinstance(data, dict):
+                  print(f"ERROR: {p} is not a mapping"); ok = False; continue
+              for key in ("name", "base-image", "modules"):
+                  if key not in data:
+                      print(f"ERROR: {p} missing required key: {key}"); ok = False
+              if "modules" in data and not isinstance(data["modules"], list):
+                  print(f"ERROR: {p} 'modules' must be a list"); ok = False
+          if not ok:
+              sys.exit(1)
+          print("All recipes valid")
+          PY

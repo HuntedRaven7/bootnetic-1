@@ -1,0 +1,29 @@
+# .pre-commit-config.yaml
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-json
+      - id: check-toml
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+        exclude: ^flake\.lock$
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: local
+    hooks:
+      - id: shellcheck
+        name: Shellcheck custom scripts
+        entry: bash -c 'if command -v shellcheck >/dev/null 2>&1; then find files -iname "*.sh" -type f -print0 | xargs -0 -r shellcheck; else echo "shellcheck not installed, skipping"; fi'
+        language: system
+        files: '^files/.*\.sh$'
+        pass_filenames: false
+
+      - id: validate-recipes
+        name: Validate BlueBuild recipes
+        entry: bash ci/validate-recipes.sh
+        language: system
+        files: '^recipes/.*\.yml$'
+        pass_filenames: false
